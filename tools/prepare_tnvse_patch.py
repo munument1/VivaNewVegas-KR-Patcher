@@ -73,7 +73,7 @@ def prepare(release: Path, source: Path, output: Path):
             if (path.is_file() and not any(part in excluded for part in rel.parts)
                     and path.suffix.casefold() not in {'.ttf', '.otf', '.woff', '.woff2'}):
                 zipout.write(path, 'tNVSE/' + rel.as_posix())
-        for name in ('build_tnvse_patch.ps1', 'tnvse/ui-replacement-encoding.patch'):
+        for name in ('build_tnvse_patch.ps1', 'tnvse/ui-replacement-encoding.patch', 'tnvse/strict-lossless-encoding.patch'):
             path = Path(__file__).parent / name
             zipout.write(path, 'build/' + name)
     license_path = assets / 'tNVSE-GPL-3.0.txt'
@@ -83,9 +83,11 @@ def prepare(release: Path, source: Path, output: Path):
         'tNVSE by Artaud / TIAIMM: https://github.com/TIAIMM/tNVSE\n'
         f'Upstream source commit: {UPSTREAM_COMMIT}\n'
         'License: GPL-3.0; included in tNVSE-GPL-3.0.txt.\n'
-        'Modified for the VNV Korean patcher on 2026-10-07.\n'
+        'Modified for the VNV Korean patcher on 2026-10-27.\n'
         'Change: normalize UTF-8 GMST/UI replacement text through the existing\n'
         'tNVSE encoding converter before layout, including rich-text replacements.\n'
+        'Change: strict UTF-8 validation and lossless CP949 conversion;\\n'
+        'unrepresentable glyphs retain original bytes, without a fallback question mark.\\n'
         'No shaders, UI assets, font defaults, plugin identity or hooks changed.\n'
         'Install upstream tNVSE 71 normally; the Korean Fonts mod overrides only its DLL.\n'
         'Exact modified source and pinned submodules: tNVSE-71-KR-UI-source.zip.\n'

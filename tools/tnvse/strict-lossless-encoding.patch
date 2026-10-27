@@ -1,0 +1,241 @@
+diff --git a/tnvse/Src/font/encoding.cpp b/tnvse/Src/font/encoding.cpp
+--- a/tnvse/Src/font/encoding.cpp
++++ b/tnvse/Src/font/encoding.cpp
+@@ -1,6 +1,9 @@
+ #include "encoding.h"
+ #include "font_multibyte_prewarm_policy.h"
+ #include "load_config.h"
++#include "IDebugLog.h"
++#include <atomic>
++#include <limits>
+ 
+ namespace fonthook
+ {
+@@ -145,78 +148,126 @@
+ 
+ 	// ===================== UTF-8 =====================
+ 	bool IsValidUTF8With3ByteMin(const char* s)
+-	{
+-		if (!s)
+-			return false;
+-
+-		const UInt8* p = (const UInt8*)s;
+-		bool has3ByteOrMore = false;
+-
+-		while (*p)
+-		{
+-			if (*p < 0x80)
+-			{
+-				p++;
+-			}
+-			else if (*p < 0xC2)
+-			{
+-				return false;
+-			}
+-			else if (*p < 0xE0)
+-			{
+-				if ((p[1] & 0xC0) != 0x80)
+-					return false;
+-				p += 2;
+-			}
+-			else if (*p < 0xF0)
+-			{
+-				UInt8 c2 = p[1], c3 = p[2];
+-				if ((c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
+-					return false;
+-				has3ByteOrMore = true;
+-				p += 3;
+-			}
+-			else if (*p < 0xF5)
+-			{
+-				UInt8 c2 = p[1], c3 = p[2], c4 = p[3];
+-				if ((c2 & 0xC0) != 0x80 ||
+-					(c3 & 0xC0) != 0x80 ||
+-					(c4 & 0xC0) != 0x80)
+-					return false;
+-				has3ByteOrMore = true;
+-				p += 4;
+-			}
+-			else
+-			{
+-				return false;
+-			}
+-		}
+-
+-		return has3ByteOrMore;
+-	}
++    {
++        if (!s) return false;
++        const UInt8* p = reinterpret_cast<const UInt8*>(s);
++        bool has3ByteOrMore = false;
++        while (*p)
++        {
++            const UInt8 first = *p++;
++            if (first < 0x80) continue;
++            if (first >= 0xC2 && first <= 0xDF)
++            {
++                if (!p[0] || (p[0] & 0xC0) != 0x80) return false;
++                ++p;
++            }
++            else if (first >= 0xE0 && first <= 0xEF)
++            {
++                if (!p[0] || !p[1]) return false;
++                const UInt8 second = p[0], third = p[1];
++                if ((second & 0xC0) != 0x80 || (third & 0xC0) != 0x80
++                    || (first == 0xE0 && second < 0xA0)
++                    || (first == 0xED && second >= 0xA0)) return false;
++                p += 2;
++                has3ByteOrMore = true;
++            }
++            else if (first >= 0xF0 && first <= 0xF4)
++            {
++                if (!p[0] || !p[1] || !p[2]) return false;
++                const UInt8 second = p[0];
++                if ((second & 0xC0) != 0x80 || (p[1] & 0xC0) != 0x80
++                    || (p[2] & 0xC0) != 0x80
++                    || (first == 0xF0 && second < 0x90)
++                    || (first == 0xF4 && second > 0x8F)) return false;
++                p += 3;
++                has3ByteOrMore = true;
++            }
++            else return false;
++        }
++        // Retain the legacy two-byte-only heuristic: byte provenance is
++        // ambiguous for existing DBCS strings. Do not guess new encodings.
++        return has3ByteOrMore;
++    }
+ 
+ 	// ===================== Encoding Conversion =====================
+-	std::string UTF8ToMultiByteStr(const std::string& utf8, UInt32 codePage)
+-	{
+-		const int wideCharacterCount = MultiByteToWideChar(CP_UTF8, 0,
+-			utf8.c_str(), static_cast<int>(utf8.size()), nullptr, 0);
+-		if (wideCharacterCount == 0)
+-			return "";
+-		std::wstring wideText(static_cast<size_t>(wideCharacterCount), L'\0');
+-		MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(),
+-			static_cast<int>(utf8.size()), wideText.data(), wideCharacterCount);
+-
+-		const int encodedByteCount = WideCharToMultiByte(codePage, 0,
+-			wideText.data(), static_cast<int>(wideText.size()), nullptr, 0,
+-			nullptr, nullptr);
+-		if (encodedByteCount == 0)
+-			return "";
+-		std::string encodedText(static_cast<size_t>(encodedByteCount), '\0');
+-		WideCharToMultiByte(codePage, 0, wideText.data(),
+-			static_cast<int>(wideText.size()), encodedText.data(), encodedByteCount,
+-			nullptr, nullptr);
+-		return encodedText;
+-	}
++	namespace
++    {
++        void TraceEncodingConversionFailure(const char* reason, UInt32 codePage, size_t bytes)
++        {
++            static std::atomic<unsigned> remaining{8};
++            unsigned count = remaining.load(std::memory_order_relaxed);
++            while (count && !remaining.compare_exchange_weak(
++                count, count - 1, std::memory_order_relaxed)) {}
++            if (count)
++                gLog.FormattedMessage(
++                    "tnvse_encoding_boundary: conversion_skipped reason=%s codePage=%u bytes=%u",
++                    reason, codePage, static_cast<unsigned>(bytes));
++        }
++    }
++
++    bool TryUTF8ToMultiByteStr(std::string_view utf8, UInt32 codePage, std::string& converted)
++    {
++        if (utf8.empty()) { converted.clear(); return true; }
++        if (utf8.size() > static_cast<size_t>(std::numeric_limits<int>::max())) return false;
++        const int inputBytes = static_cast<int>(utf8.size());
++        const int wideCount = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
++            utf8.data(), inputBytes, nullptr, 0);
++        if (!wideCount)
++        {
++            TraceEncodingConversionFailure("invalid_utf8", codePage, utf8.size());
++            return false;
++        }
++        std::wstring wide(static_cast<size_t>(wideCount), L'\0');
++        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
++            utf8.data(), inputBytes, wide.data(), wideCount) != wideCount) return false;
++        // Reviewed display-equivalent mapping already used by the Korean
++        // patcher. Avoid Windows best-fit while retaining these two targets.
++        if (codePage == 949)
++            for (wchar_t& unit : wide)
++                if (unit == 0x2014) unit = 0x2015;
++        const bool outputUtf8 = codePage == CP_UTF8;
++        const DWORD flags = outputUtf8 ? WC_ERR_INVALID_CHARS : WC_NO_BEST_FIT_CHARS;
++        BOOL usedDefault = FALSE;
++        BOOL* defaultFlag = outputUtf8 ? nullptr : &usedDefault;
++        const int count = WideCharToMultiByte(codePage, flags,
++            wide.data(), wideCount, nullptr, 0, nullptr, defaultFlag);
++        if (!count || usedDefault)
++        {
++            TraceEncodingConversionFailure("unrepresentable", codePage, utf8.size());
++            return false;
++        }
++        std::string result(static_cast<size_t>(count), '\0');
++        usedDefault = FALSE;
++        if (WideCharToMultiByte(codePage, flags, wide.data(), wideCount,
++            result.data(), count, nullptr, defaultFlag) != count || usedDefault)
++        {
++            TraceEncodingConversionFailure("unrepresentable", codePage, utf8.size());
++            return false;
++        }
++        // Check Unicode roundtrip as well as Windows' default-character flag.
++        const int checkCount = MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS,
++            result.data(), count, nullptr, 0);
++        if (checkCount != wideCount)
++        {
++            TraceEncodingConversionFailure("roundtrip", codePage, utf8.size());
++            return false;
++        }
++        std::wstring check(static_cast<size_t>(checkCount), L'\0');
++        if (MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS,
++            result.data(), count, check.data(), checkCount) != checkCount || check != wide)
++        {
++            TraceEncodingConversionFailure("roundtrip", codePage, utf8.size());
++            return false;
++        }
++        converted.swap(result);
++        return true;
++    }
++
++    std::string UTF8ToMultiByteStr(const std::string& utf8, UInt32 codePage)
++    {
++        std::string converted;
++        return TryUTF8ToMultiByteStr(utf8, codePage, converted) ? converted : utf8;
++    }
+ 
+ 	std::string WideToUTF8(std::wstring_view value)
+ 	{
+diff --git a/tnvse/Src/font/encoding.h b/tnvse/Src/font/encoding.h
+--- a/tnvse/Src/font/encoding.h
++++ b/tnvse/Src/font/encoding.h
+@@ -69,6 +69,7 @@
+ 	}
+ 
+ 	// ---- Encoding Conversion ----
++	bool TryUTF8ToMultiByteStr(std::string_view utf8, UInt32 codePage, std::string& converted);
+ 	std::string UTF8ToMultiByteStr(const std::string& utf8, UInt32 codePage);
+ 	std::string WideToUTF8(std::wstring_view value);
+ 
+@@ -102,12 +103,12 @@
+ 	// Caller must keep outConverted alive while using pSrc.
+ 	// Returns true if conversion was performed.
+ 	inline bool ConvertToMultiByte(const char*& pSrc, std::string& outConverted, bool hasExtraGlyphs)
+-	{
+-		if (!ShouldConvertUTF8(hasExtraGlyphs)) return false;
+-		if (!IsValidUTF8With3ByteMin(pSrc)) return false;
+-		outConverted = UTF8ToMultiByteStr(pSrc, g_usingWinEncoding);
+-		pSrc = outConverted.c_str();
+-		return true;
+-	}
++    {
++        if (!ShouldConvertUTF8(hasExtraGlyphs)) return false;
++        if (!IsValidUTF8With3ByteMin(pSrc)) return false;
++        if (!TryUTF8ToMultiByteStr(pSrc, g_usingWinEncoding, outConverted)) return false;
++        pSrc = outConverted.c_str();
++        return true;
++    }
+ 
+ } // namespace fonthook
