@@ -1,0 +1,87 @@
+name: Build and release VNV Korean patcher
+on:
+  pull_request:
+    paths:
+      - 'tools/build_encoding_release.py'
+      - 'tools/build_tnvse_patch.ps1'
+      - 'tools/tnvse/**'
+      - 'vnvkr.py'
+      - '.github/workflows/vnv-encoding-release.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/build_encoding_release.py'
+      - 'tools/build_tnvse_patch.ps1'
+      - 'tools/tnvse/**'
+      - 'vnvkr.py'
+      - '.github/workflows/vnv-encoding-release.yml'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packaging dependencies
+        run: python -m pip install pyinstaller==6.22.3
+      - name: Build fresh tNVSE Win32 DLL from pinned source
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x86 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_tnvse_patch.ps1
+          if errorlevel 1 exit /b 1
+      - name: Run C++ replacement and lossless encoding regression
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x86 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          if not exist build mkdir build
+          python tools\tnvse\replacement_regression.py .tnvse-source build\replacement-regression.cpp
+          if errorlevel 1 exit /b 1
+          cl /nologo /EHsc /std:c++20 /utf-8 /Febuild\replacement-regression.exe build\replacement-regression.cpp
+          if errorlevel 1 exit /b 1
+          build\replacement-regression.exe
+          if errorlevel 1 exit /b 1
+      - name: Regression tests for patcher and UI
+        shell: pwsh
+        run: |
+          foreach ($name in @('test_fonts.py','test_release_packaging.py','test_runtime_mods.py','test_plugin_text.py','test_output.py','test_profiles.py')) {
+            python -m unittest discover -s tests -p $name -v
+            if ($LASTEXITCODE) { throw "Tests failed: $name" }
+          }
+      - name: Retrieve latest verified release baseline
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .base-release | Out-Null
+          gh release download v1.0.7.6 -R munument1/VivaNewVegas-KR-Patcher -p 'VNVKoreanPatcher-v1.0.7.6.exe' -p 'SHA256SUMS.txt' --dir .base-release
+          if ($LASTEXITCODE) { throw 'Could not obtain base release' }
+      - name: Preserve prior resources while rebuilding source and DLL
+        shell: pwsh
+        run: |
+          python tools/build_encoding_release.py --base .base-release/VNVKoreanPatcher-v1.0.7.6.exe --checksums .base-release/SHA256SUMS.txt --dll .tnvse-source/out/kr-ui-fix/bin/Release/tnvse.dll --tnvse .tnvse-source --repo . --work .encoding-build --out dist/release
+          if ($LASTEXITCODE) { throw 'Release verification failed' }
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: VNV-v1.0.7.7-build
+          if-no-files-found: error
+          path: |
+            dist/release/VNVKoreanPatcher-v1.0.7.7.exe
+            dist/release/tNVSE-71-KR-UI-source.zip
+            dist/release/SHA256SUMS.txt
+      - name: Publish release on main only
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          gh release view v1.0.7.7 -R munument1/VivaNewVegas-KR-Patcher *> $null
+          if ($LASTEXITCODE -eq 0) { throw 'Tag already exists; no overwrite' }
+          gh release create v1.0.7.7 dist/release/VNVKoreanPatcher-v1.0.7.7.exe dist/release/tNVSE-71-KR-UI-source.zip dist/release/SHA256SUMS.txt -R munument1/VivaNewVegas-KR-Patcher --target '${{ github.sha }}' --title 'VNV Korean Patcher v1.0.7.7 — lossless text' --notes-file docs/releases/v1.0.7.7.md --latest
+          if ($LASTEXITCODE) { throw 'Release publication failed' }

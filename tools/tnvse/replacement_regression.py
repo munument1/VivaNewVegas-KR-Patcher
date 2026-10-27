@@ -31,6 +31,9 @@ PREFIX = r'''
 #include <cassert>
 #include <iostream>
 #include <utility>
+#include <atomic>
+#include <limits>
+#include <string_view>
 using UInt32 = unsigned int;
 using UInt8 = unsigned char;
 bool g_bEnableUTF8 = true;
@@ -48,6 +51,10 @@ struct FontEx : Font {};
 struct FontManager { Font* pFont[1]; static FontManager* GetSingleton() { return nullptr; } };
 std::map<std::string, std::string> gmst, replacements;
 bool positive = true;
+unsigned encodingWarnings = 0;
+struct RegressionLog {
+    template<typename... Args> void FormattedMessage(const char*, Args...) { ++encodingWarnings; }
+} gLog;
 bool CopyLookup(const std::map<std::string, std::string>& lookup, const char* key, char* out) {
 auto it = lookup.find(key); if (it == lookup.end()) return false;
 strcpy_s(out, 1024, it->second.c_str()); return true; }
@@ -103,6 +110,32 @@ Font iconFont; FontManager manager; manager.pFont[0] = &iconFont;
 replacements["&icon;"] = "\\button.dds";
 index = 0; out.clear(); TryAppendRichTextReplacement(&manager, "&icon;", index, out);
 assert(out == std::string(1, '\x01') && iconFont.icons.back() == "button.dds");
+// Validate the actual strict parser and lossless Win32 conversion.
+assert(IsValidUTF8With3ByteMin(hangul.c_str()));
+assert(!IsValidUTF8With3ByteMin(nullptr));
+assert(!IsValidUTF8With3ByteMin("ASCII"));
+assert(!IsValidUTF8With3ByteMin("\xe0\x80\x80"));
+assert(!IsValidUTF8With3ByteMin("\xed\xa0\x80"));
+assert(!IsValidUTF8With3ByteMin("\xf4\x90\x80\x80"));
+assert(!IsValidUTF8With3ByteMin("\xe3\x80"));
+assert(!IsValidUTF8With3ByteMin("\xf0\x90\x80"));
+const std::string malformed("\xe0\x80\x80", 3);
+const std::string emoji = "한글😀";
+std::string converted = "unchanged";
+assert(!TryUTF8ToMultiByteStr(malformed, 949, converted) && converted == "unchanged");
+assert(UTF8ToMultiByteStr(malformed, 949) == malformed);
+assert(!TryUTF8ToMultiByteStr(emoji, 949, converted) && converted == "unchanged");
+assert(UTF8ToMultiByteStr(emoji, 949) == emoji);
+const char* orig = emoji.c_str();
+std::string storage = "keep";
+assert(!ConvertToMultiByte(orig, storage, true));
+assert(orig == emoji.c_str() && storage == "keep");
+const std::string dash = "한글—설명";
+const std::string expectedDash = UTF8ToMultiByteStr("한글―설명", 949);
+assert(TryUTF8ToMultiByteStr(dash, 949, converted) && converted == expectedDash);
+assert(TryUTF8ToMultiByteStr(emoji, CP_UTF8, converted) && converted == emoji);
+assert(encodingWarnings > 0 && encodingWarnings <= 8);
+
 std::cout << "replacement regression: GMST, key prompts, mixed CP949, rich text, icon paths, flags passed\n";
 }
 '''
