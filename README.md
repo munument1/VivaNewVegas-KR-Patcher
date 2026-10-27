@@ -1,4 +1,4 @@
-# Viva New Vegas 한국어 패쳐 v1.0.7.3
+# Viva New Vegas 한국어 패쳐 v1.0.7.7
 
 `Viva New Vegas Extended` 프로필을 **읽기만** 하여 번역 파일을 별도 Output에 생성합니다. MO2와 게임 원본을 직접 변경하지 않으며, 프로필 파일도 생성하거나 변경하지 않습니다.
 
@@ -6,7 +6,7 @@
 
 1. 원본 tNVSE 71과 선행 모드를 기존 가이드대로 MO2에 설치합니다.
 2. `Viva New Vegas Extended` 프로필이 있는지 확인하고 MO2를 종료합니다. 패쳐는 현재 선택된 프로필과 관계없이 이 프로필을 읽습니다.
-3. `VNVKoreanPatcher-v1.0.7.3.exe`를 실행하고 `ModOrganizer.ini`가 있는 인스턴스 폴더를 선택합니다.
+3. `VNVKoreanPatcher-v1.0.7.7.exe`를 실행하고 `ModOrganizer.ini`가 있는 인스턴스 폴더를 선택합니다.
 4. **Output 생성**을 누릅니다.
 5. 덮어쓸 기존 모드 파일을 백업한 뒤 `Output/INSTALL.txt`에 표시된 실제 Mods 경로로 번역 파일을 복사해 병합합니다.
 6. MO2를 열고 INSTALL.txt에 나오는 한국어 모드와 플러그인을 직접 활성화합니다. 한국어 폰트 모드는 원본 tNVSE보다 높은 우선순위에 둡니다.
@@ -26,6 +26,13 @@
 수정 tNVSE DLL은 `VNV Korean Fonts - tNVSE/NVSE/plugins/tnvse.dll`에 포함됩니다. 원본 tNVSE의 셰이더·UI 파일은 기존 설치를 사용합니다. GPL-3.0 라이선스와 수정 소스는 KR Font 폴더의 `NVSE/plugins/fonts/licenses`에 포함됩니다.
 
 SST/XEditLib로 레코드와 원문을 확인한 뒤 원본 바이너리의 승인된 문자열만 치환합니다. MCM JSON·Translation INI, 라디오/UI 및 터미널 텍스처도 포함합니다. 변경된 영문 원문은 추측 번역하지 않으며 생성 보고서에 기록합니다. 별도 Python 설치는 필요하지 않습니다.
+
+## v1.0.7.7 업데이트 (2026-10-27)
+
+최신 버전은 [GitHub v1.0.7.7 정식 릴리스](https://github.com/munument1/VivaNewVegas-KR-Patcher/releases/tag/v1.0.7.7)에서 받으세요.
+v1.0.7.6의 기존 번역·폰트·UI 수정은 유지하며, 수정 tNVSE DLL의 UTF-8 검증과 CP949 무손실 변환을 강화했습니다.
+**최신 EXE로 새 Output을 생성**해야 적용됩니다. 이전 Output을 재사용하거나 DLL만 교체하지 마세요.
+릴리스에는 대응 수정 소스 ZIP과 SHA256 체크섬을 함께 제공합니다. 실제 게임의 모든 대화·알림 표시 검증은 별도 확인이 필요합니다.
 
 ## 1.0.7.2 이하 버전에서 업데이트
 
