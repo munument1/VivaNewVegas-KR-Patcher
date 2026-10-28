@@ -82,6 +82,6 @@ jobs:
         shell: pwsh
         run: |
           gh release view v1.0.7.7 -R munument1/VivaNewVegas-KR-Patcher *> $null
-          if ($LASTEXITCODE -eq 0) { throw 'Tag already exists; no overwrite' }
+          if ($LASTEXITCODE -eq 0) { Write-Host 'v1.0.7.7 already published; preserving release assets'; exit 0 }
           gh release create v1.0.7.7 dist/release/VNVKoreanPatcher-v1.0.7.7.exe dist/release/tNVSE-71-KR-UI-source.zip dist/release/SHA256SUMS.txt -R munument1/VivaNewVegas-KR-Patcher --target '${{ github.sha }}' --title 'VNV Korean Patcher v1.0.7.7 — lossless text' --notes-file docs/releases/v1.0.7.7.md --latest
           if ($LASTEXITCODE) { throw 'Release publication failed' }
